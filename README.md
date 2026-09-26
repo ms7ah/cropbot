@@ -1,4 +1,6 @@
-# CropBot 🌱🤖
+<p align="center"><img src="docs/cropbot_logo.png" alt="CropBot logo" width="320"></p>
+
+# CropBot
 
 An AI-powered ground robot that helps Jordanian smallholder farmers catch tomato leaf disease early.
 
