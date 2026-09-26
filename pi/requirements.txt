@@ -1,0 +1,7 @@
+# Tested versions. All have ready-made builds for the Raspberry Pi 4 (64-bit OS).
+ncnn==1.0.20260526
+opencv-python-headless==4.13.0.92
+numpy>=1.26,<3
+pyserial==3.5
+requests>=2.31,<3
+PyYAML>=6.0,<7

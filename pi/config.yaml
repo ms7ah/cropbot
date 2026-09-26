@@ -1,0 +1,32 @@
+# CropBot Pi settings. After editing, restart:  sudo systemctl restart cropbot
+
+# Where the farmer dashboard runs (the laptop's address on the booth WiFi).
+# Find it on the dashboard's Settings page. Leave empty ("") to only save results on the Pi.
+dashboard_url: "http://192.168.1.100:8000"
+
+# Arduino Nano (USB). "auto" finds it by itself; or set e.g. "/dev/ttyUSB0".
+serial_port: auto
+serial_baud: 115200
+
+# USB side camera. 0 is the first camera; try 1 or 2 if the wrong one opens.
+camera_index: 0
+camera_width: 640
+camera_height: 480
+
+# Disease model
+model_dir: models/cropbot_v3_ncnn
+model_imgsz: 640
+model_threads: 4
+
+# Detections below this confidence are ignored. 0.75 = prototype setting.
+confidence_threshold: 0.75
+
+# Photos taken per side, and how many must agree on the same disease.
+burst_frames: 3
+min_agree: 2
+
+# Keep every photo + raw confidences on the Pi (captures/), for tuning the threshold.
+save_captures: true
+
+# How often the Pi tells the dashboard "I'm alive" (seconds).
+heartbeat_seconds: 5
