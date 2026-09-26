@@ -15,7 +15,7 @@ Messages between the Nano and the Pi are described in [`../PROTOCOL.md`](../PROT
 
 You do steps A and B **once, at home, with internet**. Copy-paste the commands exactly.
 
-### A. Prepare the Pi's SD card (skip if the Pi already runs 64-bit Raspberry Pi OS)
+### A. Prepare the Pi's SD card (skip if your Pi is already set up and you can log in to it)
 
 1. On a laptop, install **Raspberry Pi Imager** (raspberrypi.com/software).
 2. Choose: Device **Raspberry Pi 4** → OS **Raspberry Pi OS (64-bit)** → your SD card.
@@ -31,11 +31,13 @@ You can type commands either with a keyboard + monitor on the Pi, or from a lapt
 
 ```bash
 sudo apt-get install -y git
-git clone https://github.com/ms7ah/cropbot.git
-cd cropbot/pi
+git clone https://github.com/ms7ah/cropbot.git ~/cropbot-team
+cd ~/cropbot-team/pi
 ./install.sh
 sudo reboot
 ```
+
+The code goes into a folder called **`cropbot-team`**, so it never touches any `cropbot` folder you already have on the Pi.
 
 `install.sh` installs everything, tests the AI model (you should see **SELF-TEST PASSED** with a speed per photo), and makes CropBot **start by itself every time the Pi powers on**. No keyboard or screen is needed on the robot after this.
 
@@ -46,7 +48,7 @@ sudo reboot
 Stop the auto-started copy first, so the camera and USB port are free:
 
 ```bash
-cd ~/cropbot/pi
+cd ~/cropbot-team/pi
 sudo systemctl stop cropbot
 ```
 
@@ -54,11 +56,11 @@ sudo systemctl stop cropbot
 
 Terminal 1 (a stand-in dashboard that saves every result as a photo with boxes):
 ```bash
-cd ~/cropbot/pi && .venv/bin/python tools/fake_dashboard.py
+cd ~/cropbot-team/pi && .venv/bin/python tools/fake_dashboard.py
 ```
 Terminal 2:
 ```bash
-cd ~/cropbot/pi && .venv/bin/python -m cropbot_pi --keyboard --fake-camera samples --dashboard http://localhost:8000
+cd ~/cropbot-team/pi && .venv/bin/python -m cropbot_pi --keyboard --fake-camera samples --dashboard http://localhost:8000
 ```
 Type `SCAN 1 A`, Enter, then `SCAN 1 B`. Terminal 1 should print a result for each, and the photos appear in `received/`. Ctrl+C to stop both.
 
@@ -79,7 +81,7 @@ When done testing, turn auto-start back on: `sudo systemctl start cropbot`.
 1. The Pi and the dashboard laptop must be on the **same WiFi** (the phone hotspot).
 2. Put the laptop's address in `config.yaml` (it's shown on the dashboard's Settings page):
    ```bash
-   nano ~/cropbot/pi/config.yaml        # edit dashboard_url, Ctrl+O Enter to save, Ctrl+X to exit
+   nano ~/cropbot-team/pi/config.yaml        # edit dashboard_url, Ctrl+O Enter to save, Ctrl+X to exit
    sudo systemctl restart cropbot
    ```
 3. Watch the robot's brain live: `journalctl -u cropbot -f`
@@ -88,7 +90,7 @@ When done testing, turn auto-start back on: `sudo systemctl start cropbot`.
 
 Whenever Mu'men says there's an update:
 ```bash
-cd ~/cropbot/pi && ./update.sh
+cd ~/cropbot-team/pi && ./update.sh
 ```
 
 ## Useful commands

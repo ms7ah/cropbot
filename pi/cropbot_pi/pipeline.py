@@ -46,18 +46,24 @@ class Pipeline:
 
     def process(self, station: int, side: str, frames: list[np.ndarray], captured_at: str) -> dict:
         per_frame: list[list[Detection]] = []
+        confident: list[list[Detection]] = []
         times = []
-        for f in frames:
+        votes = Counter()  # one vote per class per frame
+        for i, f in enumerate(frames):
             dets, ms = self.detector.detect(f, LOG_FLOOR)
             per_frame.append(dets)
             times.append(ms)
-        confident = [[d for d in dets if d.confidence >= self.threshold] for dets in per_frame]
-
-        # one vote per class per frame
-        votes = Counter()
-        for dets in confident:
-            for cid in {d.class_id for d in dets}:
+            conf_dets = [d for d in dets if d.confidence >= self.threshold]
+            confident.append(conf_dets)
+            for cid in {d.class_id for d in conf_dets}:
                 votes[cid] += 1
+            # Stop early once the answer can't change (saves ~1 s per side on the Pi):
+            # a disease already has enough votes, or none can still reach enough.
+            remaining = len(frames) - (i + 1)
+            best = max(votes.values(), default=0)
+            if best >= self.min_agree or best + remaining < self.min_agree:
+                break
+        frames = frames[: len(per_frame)]
         confirmed = {cid for cid, n in votes.items() if n >= self.min_agree}
 
         if confirmed:
