@@ -74,6 +74,24 @@ Type `SCAN 1 A`, Enter, then `SCAN 1 B`. Terminal 1 should print a result for ea
 
 When done testing, turn auto-start back on: `sudo systemctl start cropbot`.
 
+**Test 4 — Live camera stream** (runs inside the CropBot service, no extra program):
+```bash
+sudo systemctl restart cropbot
+journalctl -u cropbot -n 20        # look for: Live stream at http://<ip>:8081/stream
+```
+1. On a laptop/phone on the same WiFi, open `http://cropbot.local:8081/stream` (on Windows use the Pi's IP from `hostname -I`, e.g. `http://192.168.8.248:8081/stream`). You should see live video at about 5 frames per second. `http://<pi>:8081/snapshot.jpg` gives a single photo.
+2. Keep the stream open and run a full Nano patrol. In `journalctl -u cropbot -f`, scan times should stay about the same as before (~0.5 s per photo).
+3. Unplug the camera for 5 s and plug it back in. The stream shows **"Camera reconnecting..."** and then comes back by itself, the log shows `Camera LOST` then `Camera is BACK`, and the next SCAN works **without restarting** anything.
+4. While streaming, run `top` and note CropBot's CPU %. The stream only uses CPU while someone is watching.
+
+To turn the stream off: set `stream_enabled: false` in `config.yaml`, then `sudo systemctl restart cropbot`.
+
+**For the dashboard** (Rahaf & Farah), the camera panel is just:
+```html
+<img src="http://<pi-ip>:8081/stream" alt="CropBot live camera">
+```
+The laptop and the Pi must be on the same hotspot. Use the Pi's IP address: `cropbot.local` often doesn't work on Windows.
+
 ---
 
 ## At the booth
@@ -114,6 +132,8 @@ cd ~/cropbot-team/pi && ./update.sh
 | `Could not open camera 0` | Try `camera_index: 1` in `config.yaml`; check with `v4l2-ctl --list-devices`. |
 | `Dashboard NOT reachable` | Laptop and Pi on the same WiFi? `dashboard_url` correct? Dashboard running? On Windows, allow port 8000 through the firewall. Results are kept and sent later, so nothing is lost. |
 | `Device or resource busy` when testing | The auto-started copy is running: `sudo systemctl stop cropbot`. |
+| Another program can't open the camera | CropBot holds the camera while it runs. Use the live stream (`:8081/stream`) instead of opening the camera a second time. |
+| `Camera LOST` in the log | Loose cable or USB power dip. CropBot reconnects by itself; if it happens often, use a shorter or better cable and a stronger Pi power supply. |
 | Healthy leaf reported sick, or the opposite | Tell Mu'men. Every photo + raw score is saved in `captures/<date>/scans.csv` for tuning `confidence_threshold`. |
 
 ---
@@ -125,6 +145,7 @@ cd ~/cropbot-team/pi && ./update.sh
 | `config.yaml` | All settings (dashboard address, camera, threshold…) |
 | `cropbot_pi/` | The program: `detector.py` (AI model), `camera.py`, `nano_link.py`, `pipeline.py` (3-photo voting), `uploader.py` (sending + offline queue), `__main__.py` |
 | `models/cropbot_v3_ncnn/` | The trained disease model (YOLOv8n, NCNN format) |
+| `cropbot_pi/stream.py` | Live camera stream for the dashboard (port 8081) |
 | `tools/fake_dashboard.py` | Stand-in dashboard for testing |
 | `tools/self_test.py` | Checks the model works and how fast |
 | `samples/` | 5 public tomato leaf photos for testing (PlantVillage dataset, not our training data) |

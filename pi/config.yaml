@@ -30,3 +30,10 @@ save_captures: true
 
 # How often the Pi tells the dashboard "I'm alive" (seconds).
 heartbeat_seconds: 5
+
+# Live camera video for the dashboard:  http://<pi-ip>:8081/stream
+# (only uses CPU while someone is watching). false = no stream at all.
+stream_enabled: true
+stream_port: 8081
+stream_fps: 5
+stream_jpeg_quality: 70

@@ -4,6 +4,8 @@
     python -m cropbot_pi --keyboard           type SCAN commands yourself (no Nano)
     python -m cropbot_pi --fake-camera DIR    use photos from a folder (no camera)
 
+A live camera stream runs at http://<pi>:8081/stream (see stream.py).
+
 At each plant station the Nano sends "SCAN <station> <side>". The Pi grabs a
 short burst of photos, immediately replies "CAPTURED <station> <side>" (so the
 Nano can flip the camera / drive on right away), then checks the photos with
@@ -27,6 +29,7 @@ from .camera import Camera, FakeCamera
 from .detector import Detector
 from .nano_link import KeyboardLink, NanoLink
 from .pipeline import Pipeline, now_iso
+from .stream import LiveStream
 from .uploader import Uploader
 
 PI_DIR = Path(__file__).resolve().parent.parent  # the pi/ folder
@@ -167,6 +170,10 @@ def main() -> None:
         camera = Camera(cfg.get("camera_index", 0), cfg.get("camera_width", 640),
                         cfg.get("camera_height", 480))
     camera.start()
+    if cfg.get("stream_enabled", True):
+        LiveStream(camera, port=int(cfg.get("stream_port", 8081)),
+                   fps=float(cfg.get("stream_fps", 5)),
+                   quality=int(cfg.get("stream_jpeg_quality", 70))).start()
 
     pipeline = Pipeline(
         detector,

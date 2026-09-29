@@ -19,6 +19,17 @@ log = logging.getLogger(__name__)
 
 
 class Camera:
+    """Keeps the newest camera frame in memory, and survives a flaky camera.
+
+    - A corrupted frame (OpenCV 5 raises cv2.error for these) is skipped.
+    - If no good frame arrives for STALE_S seconds, the camera is closed and
+      reopened in a loop until it comes back (loose cable, USB power dip).
+    - If the camera is unplugged at start-up, the service keeps running and
+      keeps retrying instead of exiting.
+    """
+
+    STALE_S = 2.0
+
     def __init__(self, index: int | str = 0, width: int = 640, height: int = 480):
         self.index = index
         self.width = width
@@ -26,64 +37,117 @@ class Camera:
         self._cap: cv2.VideoCapture | None = None
         self._frame: np.ndarray | None = None
         self._frame_no = 0
+        self._frame_time = 0.0
         self._cond = threading.Condition()
         self._running = False
         self._thread: threading.Thread | None = None
+        self._healthy: bool | None = None  # None = not seen yet
 
     def start(self) -> None:
-        self._open()
+        log.info("OpenCV %s", cv2.__version__)
         self._running = True
         self._thread = threading.Thread(target=self._reader, name="camera", daemon=True)
         self._thread.start()
-        # wait for the first frame so we know the camera really works
-        self.burst(1, timeout=10)
-        log.info("Camera %s ready (%dx%d)", self.index, *self.frame_size())
+        with self._cond:  # wait for a first frame, but never fail start-up over it
+            self._cond.wait_for(lambda: self._frame_no > 0, timeout=10)
+        if self._frame_no == 0:
+            log.warning("Camera %s not working yet - will keep retrying in the background",
+                        self.index)
 
-    def _open(self) -> None:
-        cap = cv2.VideoCapture(self.index, cv2.CAP_V4L2) if isinstance(self.index, int) \
-            else cv2.VideoCapture(self.index)
-        if not cap.isOpened():
-            cap = cv2.VideoCapture(self.index)  # fall back to OpenCV's default backend
-        if not cap.isOpened():
-            raise RuntimeError(
-                f"Could not open camera {self.index!r}. Is it plugged in? "
-                "Try another camera_index in config.yaml (0, 1, 2...)."
-            )
-        # MJPG lets cheap USB cameras deliver full frame rate at 640x480
-        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        self._cap = cap
+    # ---- opening / closing (never raise) ---------------------------------
+    def _try_open(self) -> bool:
+        try:
+            cap = cv2.VideoCapture(self.index, cv2.CAP_V4L2) if isinstance(self.index, int) \
+                else cv2.VideoCapture(self.index)
+            if not cap.isOpened():
+                cap.release()
+                cap = cv2.VideoCapture(self.index)  # OpenCV's default backend
+            if not cap.isOpened():
+                cap.release()
+                return False
+            # MJPG lets cheap USB cameras deliver full frame rate at 640x480
+            cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            self._cap = cap
+            return True
+        except Exception as e:
+            log.debug("Opening camera failed: %s", e)
+            return False
 
+    def _release(self) -> None:
+        try:
+            if self._cap is not None:
+                self._cap.release()
+        except Exception:
+            pass
+        self._cap = None
+
+    def _mark_lost(self, why: str) -> None:
+        if self._healthy is not False:  # log once per outage
+            if self._healthy is None:
+                log.warning("Camera %s not found (%s). Is it plugged in? Retrying...",
+                            self.index, why)
+            else:
+                log.warning("Camera LOST (%s) - reconnecting...", why)
+            self._healthy = False
+
+    # ---- reader thread ------------------------------------------------------
     def _reader(self) -> None:
-        failures = 0
+        backoff = 0.5
+        last_good = time.monotonic()
         while self._running:
-            ok, frame = self._cap.read()
-            if not ok or frame is None:
-                failures += 1
-                if failures in (10, 100) or failures % 500 == 0:
-                    log.warning("Camera read failing (%d times); reopening", failures)
-                    try:
-                        self._cap.release()
-                        time.sleep(0.5)
-                        self._open()
-                    except RuntimeError as e:
-                        log.error("%s", e)
-                time.sleep(0.02)
+            if self._cap is None:
+                if self._try_open():
+                    backoff = 0.5
+                    last_good = time.monotonic()  # grace period for the first frame
+                else:
+                    self._mark_lost("cannot open")
+                    time.sleep(backoff)
+                    backoff = min(backoff * 2, 1.5)
+                    continue
+            try:
+                ok, frame = self._cap.read()
+            except Exception:  # e.g. cv2.error on a corrupted MJPEG frame
+                ok, frame = False, None
+            now = time.monotonic()
+            if ok and frame is not None and frame.size:
+                last_good = now
+                if self._healthy is not True:
+                    if self._healthy is None:
+                        log.info("Camera %s ready (%dx%d)", self.index, frame.shape[1],
+                                 frame.shape[0])
+                    else:
+                        log.info("Camera is BACK")
+                    self._healthy = True
+                with self._cond:
+                    self._frame = frame
+                    self._frame_no += 1
+                    self._frame_time = now
+                    self._cond.notify_all()
                 continue
-            failures = 0
-            with self._cond:
-                self._frame = frame
-                self._frame_no += 1
-                self._cond.notify_all()
+            if now - last_good > self.STALE_S:
+                self._mark_lost("no frames")
+                self._release()  # next loop reopens
+                continue
+            time.sleep(0.02)
+        self._release()
 
+    # ---- used by scans and the live stream -------------------------------------
     def frame_size(self) -> tuple[int, int]:
         with self._cond:
             if self._frame is None:
                 return (self.width, self.height)
             h, w = self._frame.shape[:2]
             return (w, h)
+
+    def latest(self) -> tuple[np.ndarray | None, int, float]:
+        """Newest frame (a copy), its number, and its age in seconds."""
+        with self._cond:
+            if self._frame is None:
+                return None, 0, float("inf")
+            return self._frame.copy(), self._frame_no, time.monotonic() - self._frame_time
 
     def burst(self, n: int, timeout: float = 3.0) -> list[np.ndarray]:
         """Return n frames that all arrived *after* this call started."""
@@ -107,8 +171,7 @@ class Camera:
         self._running = False
         if self._thread:
             self._thread.join(timeout=2)
-        if self._cap:
-            self._cap.release()
+        self._release()
 
 
 class FakeCamera:
@@ -124,6 +187,8 @@ class FakeCamera:
         self.width, self.height = width, height
         self._i = 0
         self._rng = np.random.default_rng(0)
+        self._last: np.ndarray | None = None
+        self._last_no = 0
 
     def start(self) -> None:
         log.info("Using FAKE camera: %d images from %s", len(self.paths), self.paths[0].parent)
@@ -146,7 +211,13 @@ class FakeCamera:
         for _ in range(n):
             noise = self._rng.normal(0, 2, img.shape)
             frames.append(np.clip(img + noise, 0, 255).astype(np.uint8))
+        self._last, self._last_no = frames[-1], self._last_no + 1
         return frames
+
+    def latest(self) -> tuple[np.ndarray | None, int, float]:
+        if self._last is None:  # show the first photo until the first scan
+            self._last, self._last_no = cv2.imread(str(self.paths[0])), 1
+        return self._last.copy(), self._last_no, 0.0
 
     def stop(self) -> None:
         pass
